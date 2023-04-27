@@ -2162,5 +2162,8 @@ public class Config extends ConfigBase {
      */
     @ConfField(mutable = true, masterOnly = true)
     public static boolean experimental_enable_duplicate_without_keys_by_default = false;
+
+    @ConfField(mutable = true)
+    public static long coordinator_join_timeout_ms = 60;
 }
 

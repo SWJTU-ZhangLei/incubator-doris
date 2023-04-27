@@ -1058,6 +1058,130 @@ public class Coordinator {
         }
     }
 
+    private void retryFragment(List<TUniqueId> retryInstances) throws TException, RpcException, UserException {
+        lock();
+        try {
+            boolean twoPhaseExecution = fragments.size() >= 2;
+            // send and wait fragments rpc
+            List<Triple<BackendExecStates, BackendServiceProxy, Future<InternalService.PExecPlanFragmentResult>>>
+                    futures = Lists.newArrayList();
+            Context parentSpanContext = Context.current();
+            for (BackendExecStates states : beToExecStates.values()) {
+                for (BackendExecState state : states.states) {
+                    if (!retryInstances.contains(state.instanceId)) {
+                        continue;
+                    }
+                }
+                Span span = Telemetry.getNoopSpan();
+                if (ConnectContext.get() != null) {
+                    span = ConnectContext.get().getTracer().spanBuilder("execRemoteFragmentsAsync")
+                            .setParent(parentSpanContext).setSpanKind(SpanKind.CLIENT).startSpan();
+                }
+                states.scopedSpan = new ScopedSpan(span);
+                states.unsetFields();
+                BackendServiceProxy proxy = BackendServiceProxy.getInstance();
+                futures.add(ImmutableTriple.of(states, proxy, states.execRemoteFragmentsAsync(proxy)));
+            }
+            waitRpc(futures, this.timeoutDeadline - System.currentTimeMillis(), "send fragments");
+
+            if (twoPhaseExecution) {
+                // send and wait execution start rpc
+                futures.clear();
+                for (BackendExecStates states : beToExecStates.values()) {
+                    for (BackendExecState state : states.states) {
+                        if (!retryInstances.contains(state.instanceId)) {
+                            continue;
+                        }
+                    }
+                    Span span = Telemetry.getNoopSpan();
+                    if (ConnectContext.get() != null) {
+                        span = ConnectContext.get().getTracer().spanBuilder("execPlanFragmentStartAsync")
+                                .setParent(parentSpanContext).setSpanKind(SpanKind.CLIENT).startSpan();
+                    }
+                    states.scopedSpan = new ScopedSpan(span);
+                    BackendServiceProxy proxy = BackendServiceProxy.getInstance();
+                    futures.add(ImmutableTriple.of(states, proxy, states.execPlanFragmentStartAsync(proxy)));
+                }
+                waitRpc(futures, this.timeoutDeadline - System.currentTimeMillis(), "send execution start");
+            }
+            attachInstanceProfileToFragmentProfile();
+        } finally {
+            unlock();
+        }
+    }
+
+    private void retryPipelineCtx(List<TUniqueId> retryInstances) throws TException, RpcException, UserException {
+        lock();
+        try {
+            boolean twoPhaseExecution = fragments.size() >= 2;
+
+            // send and wait fragments rpc
+            List<Triple<PipelineExecContexts, BackendServiceProxy, Future<InternalService.PExecPlanFragmentResult>>>
+                    futures = Lists.newArrayList();
+            Context parentSpanContext = Context.current();
+            for (PipelineExecContexts ctxs : beToPipelineExecCtxs.values()) {
+                for (PipelineExecContext ctx : ctxs.ctxs) {
+                    for (TUniqueId id : ctx.fragmentInstancesMap.keySet()) {
+                        if (!retryInstances.contains(id)) {
+                            continue;
+                        }
+                    }
+                }
+                Span span = Telemetry.getNoopSpan();
+                if (ConnectContext.get() != null) {
+                    span = ConnectContext.get().getTracer().spanBuilder("execRemoteFragmentsAsync")
+                            .setParent(parentSpanContext).setSpanKind(SpanKind.CLIENT).startSpan();
+                }
+                ctxs.scopedSpan = new ScopedSpan(span);
+                ctxs.unsetFields();
+                BackendServiceProxy proxy = BackendServiceProxy.getInstance();
+                futures.add(ImmutableTriple.of(ctxs, proxy, ctxs.execRemoteFragmentsAsync(proxy)));
+            }
+            waitPipelineRpc(futures, this.timeoutDeadline - System.currentTimeMillis(), "send fragments");
+
+            if (twoPhaseExecution) {
+                // send and wait execution start rpc
+                futures.clear();
+                for (PipelineExecContexts ctxs : beToPipelineExecCtxs.values()) {
+                    for (PipelineExecContext ctx : ctxs.ctxs) {
+                        for (TUniqueId id : ctx.fragmentInstancesMap.keySet()) {
+                            if (!retryInstances.contains(id)) {
+                                continue;
+                            }
+                        }
+                    }
+                    Span span = Telemetry.getNoopSpan();
+                    if (ConnectContext.get() != null) {
+                        span = ConnectContext.get().getTracer().spanBuilder("execPlanFragmentStartAsync")
+                                .setParent(parentSpanContext).setSpanKind(SpanKind.CLIENT).startSpan();
+                    }
+                    ctxs.scopedSpan = new ScopedSpan(span);
+                    BackendServiceProxy proxy = BackendServiceProxy.getInstance();
+                    futures.add(ImmutableTriple.of(ctxs, proxy, ctxs.execPlanFragmentStartAsync(proxy)));
+                }
+                waitPipelineRpc(futures, this.timeoutDeadline - System.currentTimeMillis(), "send execution start");
+            }
+
+            attachInstanceProfileToFragmentProfile();
+        } finally {
+            unlock();
+        }
+    }
+
+    public void retry() throws TException, RpcException, UserException {
+        List<Entry<TUniqueId, Long>> unfinishedMarks = profileDoneSignal.getLeftMarks();
+        LOG.info("unfinished instance: {}", unfinishedMarks.stream()
+                .map(e -> DebugUtil.printId(e.getKey())).toArray());
+
+        List<TUniqueId> retryInstances = unfinishedMarks.stream()
+                .map(e -> e.getKey()).collect(Collectors.toList());
+        if (enablePipelineEngine) {
+            retryPipelineCtx(retryInstances);
+        } else {
+            retryFragment(retryInstances);
+        }
+    }
+
     public List<String> getExportFiles() {
         return exportFiles;
     }

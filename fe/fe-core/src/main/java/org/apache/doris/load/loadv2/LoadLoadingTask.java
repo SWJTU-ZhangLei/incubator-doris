@@ -170,7 +170,19 @@ public class LoadLoadingTask extends LoadTask {
                     .build());
         }
         curCoordinator.exec();
-        if (curCoordinator.join(waitSecond)) {
+
+        boolean execSuccess = false;
+        int joinSeconds = 0;
+        while (joinSeconds < waitSecond) {
+            if (curCoordinator.join(joinSeconds)) {
+                execSuccess = true;
+                break;
+            }
+            joinSeconds += Config.coordinator_join_timeout_ms;
+            curCoordinator.retry();
+        }
+
+        if (execSuccess) {
             Status status = curCoordinator.getExecStatus();
             if (status.ok()) {
                 attachment = new BrokerLoadingTaskAttachment(signature,
