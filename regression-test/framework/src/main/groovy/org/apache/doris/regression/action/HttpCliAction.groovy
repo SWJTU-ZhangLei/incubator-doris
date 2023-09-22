@@ -84,7 +84,7 @@ class HttpCliAction implements SuiteAction {
     void run() {
         try {
             def result = HttpClients.createDefault().withCloseable { client ->
-                uri = "http://$endpoint" + uri
+                uri = uri
                 log.info("url : " + uri)
                 log.info("body: " + body)
                 log.info("op: " + op)

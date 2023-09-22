@@ -24,12 +24,12 @@ under the License.
         <if condition='property("stdoutAppenderType").equalsIgnoreCase("teamcity")'>
             <then>
                 <encoder class="org.apache.doris.regression.logger.TeamcityServiceMessageEncoder">
-                    <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %level [%thread] \(%F:%L\) - %msg%n</pattern>
+                    <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %level - %msg%n</pattern>
                 </encoder>
             </then>
             <else>
                 <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
-                    <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %level [%thread] \(%F:%L\) - %msg%n</pattern>
+                    <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %level - %msg%n</pattern>
                 </encoder>
             </else>
         </if>
@@ -46,10 +46,10 @@ under the License.
             <maxIndex>3</maxIndex>
         </rollingPolicy>
         <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
-            <maxFileSize>500MB</maxFileSize>
+            <maxFileSize>1024MB</maxFileSize>
         </triggeringPolicy>
         <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %level [%thread] \(%F:%L\) - %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %level - %msg%n</pattern>
         </encoder>
     </appender>
 

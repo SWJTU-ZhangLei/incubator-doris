@@ -135,7 +135,7 @@ class Config {
         File confFile = new File(confFilePath)
         Config config = new Config()
         if (confFile.exists() && confFile.isFile()) {
-            log.info("Load config file ${confFilePath}".toString())
+            log.debug("Load config file ${confFilePath}".toString())
             def configSlurper = new ConfigSlurper()
             def systemProperties = Maps.newLinkedHashMap(System.getProperties())
             configSlurper.setBinding(systemProperties)
@@ -190,7 +190,7 @@ class Config {
 
         if (!config.suiteWildcard && !config.groups && !config.directories && !config.excludeSuiteWildcard
             && !config.excludeGroupSet && !config.excludeDirectorySet) {
-            log.info("no suites/directories/groups specified, set groups to p0".toString())
+            log.debug("no suites/directories/groups specified, set groups to p0".toString())
             config.groups = ["p0"].toSet()
         }
 
@@ -238,7 +238,7 @@ class Config {
         } catch (Throwable t) {
             throw new IllegalStateException("Can not parse meta service address: ${config.metaServiceHttpAddress}", t)
         }
-        log.info("msAddr : $config.metaServiceHttpAddress, socketAddr : $config.metaServiceHttpInetSocketAddress")
+        log.debug("msAddr : $config.metaServiceHttpAddress, socketAddr : $config.metaServiceHttpInetSocketAddress")
 
         config.defaultDb = cmd.getOptionValue(defaultDbOpt, config.defaultDb)
         config.jdbcUrl = cmd.getOptionValue(jdbcOpt, config.jdbcUrl)
@@ -259,16 +259,16 @@ class Config {
         config.withOutLoadData = cmd.hasOption(withOutLoadDataOpt)
         config.dryRun = cmd.hasOption(dryRunOpt)
 
-        log.info("randomOrder is ${config.randomOrder}".toString())
-        log.info("stopWhenFail is ${config.stopWhenFail}".toString())
-        log.info("withOutLoadData is ${config.withOutLoadData}".toString())
-        log.info("dryRun is ${config.dryRun}".toString())
+        log.debug("randomOrder is ${config.randomOrder}".toString())
+        log.debug("stopWhenFail is ${config.stopWhenFail}".toString())
+        log.debug("withOutLoadData is ${config.withOutLoadData}".toString())
+        log.debug("dryRun is ${config.dryRun}".toString())
 
         Properties props = cmd.getOptionProperties("conf")
         config.otherConfigs.putAll(props)
 
-        config.tryCreateDbIfNotExist()
-        config.buildUrlWithDefaultDb()
+        // config.tryCreateDbIfNotExist()
+        // config.buildUrlWithDefaultDb()
 
         return config
     }
@@ -319,148 +319,148 @@ class Config {
     static void fillDefaultConfig(Config config) {
         if (config.defaultDb == null) {
             config.defaultDb = "regression_test"
-            log.info("Set defaultDb to '${config.defaultDb}' because not specify.".toString())
+            log.debug("Set defaultDb to '${config.defaultDb}' because not specify.".toString())
         }
 
         if (config.jdbcUrl == null) {
             //jdbcUrl needs parameter here. Refer to function: buildUrl(String dbName)
             config.jdbcUrl = "jdbc:mysql://127.0.0.1:9030/?useLocalSessionState=true&allowLoadLocalInfile=true"
-            log.info("Set jdbcUrl to '${config.jdbcUrl}' because not specify.".toString())
+            log.debug("Set jdbcUrl to '${config.jdbcUrl}' because not specify.".toString())
         }
 
         if (config.jdbcUser == null) {
             config.jdbcUser = "root"
-            log.info("Set jdbcUser to '${config.jdbcUser}' because not specify.".toString())
+            log.debug("Set jdbcUser to '${config.jdbcUser}' because not specify.".toString())
         }
 
         if (config.jdbcPassword == null) {
             config.jdbcPassword = ""
-            log.info("Set jdbcPassword to empty because not specify.".toString())
+            log.debug("Set jdbcPassword to empty because not specify.".toString())
         }
 
         if (config.feSourceThriftAddress == null) {
             config.feSourceThriftAddress = "127.0.0.1:9020"
-            log.info("Set feThriftAddress to '${config.feSourceThriftAddress}' because not specify.".toString())
+            log.debug("Set feThriftAddress to '${config.feSourceThriftAddress}' because not specify.".toString())
         }
 
         if (config.feTargetThriftAddress == null) {
             config.feTargetThriftAddress = "127.0.0.1:9020"
-            log.info("Set feThriftAddress to '${config.feTargetThriftAddress}' because not specify.".toString())
+            log.debug("Set feThriftAddress to '${config.feTargetThriftAddress}' because not specify.".toString())
         }
 
         if (config.feHttpAddress == null) {
             config.feHttpAddress = "127.0.0.1:8030"
-            log.info("Set feHttpAddress to '${config.feHttpAddress}' because not specify.".toString())
+            log.debug("Set feHttpAddress to '${config.feHttpAddress}' because not specify.".toString())
         }
 
         if (config.metaServiceHttpAddress == null) {
             config.metaServiceHttpAddress = "127.0.0.1:5000"
-            log.info("Set metaServiceHttpAddress to '${config.metaServiceHttpAddress}' because not specify.".toString())
+            log.debug("Set metaServiceHttpAddress to '${config.metaServiceHttpAddress}' because not specify.".toString())
         }
 
         if (config.feSyncerUser == null) {
             config.feSyncerUser = "root"
-            log.info("Set feSyncerUser to '${config.feSyncerUser}' because not specify.".toString())
+            log.debug("Set feSyncerUser to '${config.feSyncerUser}' because not specify.".toString())
         }
 
         if (config.feSyncerPassword == null) {
             config.feSyncerPassword = ""
-            log.info("Set feSyncerPassword to empty because not specify.".toString())
+            log.debug("Set feSyncerPassword to empty because not specify.".toString())
         }
 
         if (config.syncerAddress == null) {
             config.syncerAddress = "127.0.0.1:9190"
-            log.info("Set syncerAddress to '${config.syncerAddress}' because not specify.".toString())
+            log.debug("Set syncerAddress to '${config.syncerAddress}' because not specify.".toString())
         }
 
         if (config.feHttpUser == null) {
             config.feHttpUser = "root"
-            log.info("Set feHttpUser to '${config.feHttpUser}' because not specify.".toString())
+            log.debug("Set feHttpUser to '${config.feHttpUser}' because not specify.".toString())
         }
 
         if (config.feHttpPassword == null) {
             config.feHttpPassword = ""
-            log.info("Set feHttpPassword to empty because not specify.".toString())
+            log.debug("Set feHttpPassword to empty because not specify.".toString())
         }
 
         if (config.suitePath == null) {
             config.suitePath = "regression-test/suites"
-            log.info("Set suitePath to '${config.suitePath}' because not specify.".toString())
+            log.debug("Set suitePath to '${config.suitePath}' because not specify.".toString())
         }
 
         if (config.dataPath == null) {
             config.dataPath = "regression-test/data"
-            log.info("Set dataPath to '${config.dataPath}' because not specify.".toString())
+            log.debug("Set dataPath to '${config.dataPath}' because not specify.".toString())
         }
 
         if (config.realDataPath == null) {
             config.realDataPath = "regression-test/realData"
-            log.info("Set realDataPath to '${config.realDataPath}' because not specify.".toString())
+            log.debug("Set realDataPath to '${config.realDataPath}' because not specify.".toString())
         }
 
         if (config.cacheDataPath == null) {
             config.cacheDataPath = "regression-test/cacheData"
-            log.info("Set cacheDataPath to '${config.cacheDataPath}' because not specify.".toString())
+            log.debug("Set cacheDataPath to '${config.cacheDataPath}' because not specify.".toString())
         }
 
         if (config.enableCacheData == null) {
             config.enableCacheData = true
-            log.info("Set enableCacheData to '${config.enableCacheData}' because not specify.".toString())
+            log.debug("Set enableCacheData to '${config.enableCacheData}' because not specify.".toString())
         }
 
         if (config.pluginPath == null) {
             config.pluginPath = "regression-test/plugins"
-            log.info("Set dataPath to '${config.pluginPath}' because not specify.".toString())
+            log.debug("Set dataPath to '${config.pluginPath}' because not specify.".toString())
         }
 
         if (config.sslCertificatePath == null) {
             config.sslCertificatePath = "regression-test/ssl_default_certificate"
-            log.info("Set sslCertificatePath to '${config.sslCertificatePath}' because not specify.".toString())
+            log.debug("Set sslCertificatePath to '${config.sslCertificatePath}' because not specify.".toString())
         }
 
         if (config.testGroups == null) {
             config.testGroups = "default"
-            log.info("Set testGroups to '${config.testGroups}' because not specify.".toString())
+            log.debug("Set testGroups to '${config.testGroups}' because not specify.".toString())
         }
 
         if (config.excludeGroups == null) {
             config.excludeGroups = ""
-            log.info("Set excludeGroups to empty because not specify.".toString())
+            log.debug("Set excludeGroups to empty because not specify.".toString())
         }
 
         if (config.testDirectories == null) {
             config.testDirectories = ""
-            log.info("Set testDirectories to empty because not specify.".toString())
+            log.debug("Set testDirectories to empty because not specify.".toString())
         }
 
         if (config.excludeDirectories == null) {
             config.excludeDirectories = ""
-            log.info("Set excludeDirectories to empty because not specify.".toString())
+            log.debug("Set excludeDirectories to empty because not specify.".toString())
         }
 
         if (config.testSuites == null) {
             config.testSuites = ""
-            log.info("Set testSuites to empty because not specify.".toString())
+            log.debug("Set testSuites to empty because not specify.".toString())
         }
 
         if (config.excludeSuites == null) {
             config.excludeSuites = ""
-            log.info("Set excludeSuites to empty because not specify.".toString())
+            log.debug("Set excludeSuites to empty because not specify.".toString())
         }
 
         if (config.parallel == null) {
             config.parallel = 1
-            log.info("Set parallel to 1 because not specify.".toString())
+            log.debug("Set parallel to 1 because not specify.".toString())
         }
 
         if (config.suiteParallel == null) {
             config.suiteParallel = 1
-            log.info("Set suiteParallel to 1 because not specify.".toString())
+            log.debug("Set suiteParallel to 1 because not specify.".toString())
         }
 
         if (config.actionParallel == null) {
             config.actionParallel = 10
-            log.info("Set actionParallel to 10 because not specify.".toString())
+            log.debug("Set actionParallel to 10 because not specify.".toString())
         }
     }
 
@@ -486,7 +486,7 @@ class Config {
         // connect without specify default db
         try {
             String sql = "CREATE DATABASE IF NOT EXISTS ${dbName}"
-            log.info("Try to create db, sql: ${sql}".toString())
+            log.debug("Try to create db, sql: ${sql}".toString())
             if (!dryRun) {
                 getConnection().withCloseable { conn ->
                     JdbcUtils.executeToList(conn, sql)
@@ -502,10 +502,10 @@ class Config {
     }
 
     Connection getConnectionByDbName(String dbName) {
-        String dbUrl = buildUrl(dbName)
-        tryCreateDbIfNotExist(dbName)
-        log.info("connect to ${dbUrl}".toString())
-        return DriverManager.getConnection(dbUrl, jdbcUser, jdbcPassword)
+        // String dbUrl = buildUrl(dbName)
+        // tryCreateDbIfNotExist(dbName)
+        log.debug("connect to ${jdbcUrl}".toString())
+        return DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword)
     }
 
     String getDbNameByFile(File suiteFile) {
@@ -558,7 +558,7 @@ class Config {
 
     private void buildUrlWithDefaultDb() {
         this.jdbcUrl = buildUrl(defaultDb)
-        log.info("Reset jdbcUrl to ${jdbcUrl}".toString())
+        log.debug("Reset jdbcUrl to ${jdbcUrl}".toString())
     }
 
     private String buildUrl(String dbName) {

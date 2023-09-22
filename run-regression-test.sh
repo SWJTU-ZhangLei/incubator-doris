@@ -118,10 +118,6 @@ MVN_CMD='mvn'
 if [[ -n "${CUSTOM_MVN}" ]]; then
     MVN_CMD="${CUSTOM_MVN}"
 fi
-if ! "${MVN_CMD}" --version; then
-    echo "Error: mvn is not found"
-    exit 1
-fi
 export MVN_CMD
 
 CONF_DIR="${DORIS_HOME}/regression-test/conf"
@@ -204,7 +200,7 @@ if [[ "${TEAMCITY}" -eq 1 ]]; then
     JAVA_OPTS="${JAVA_OPTS} -DstdoutAppenderType=teamcity -Xmx2048m"
 fi
 
-"${JAVA}" -DDORIS_HOME="${DORIS_HOME}" \
+java -DDORIS_HOME="${DORIS_HOME}" \
     -DLOG_PATH="${LOG_OUTPUT_FILE}" \
     -Dfile.encoding="UTF-8" \
     -Dlogback.configurationFile="${LOG_CONFIG_FILE}" \

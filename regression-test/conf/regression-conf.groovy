@@ -18,14 +18,12 @@
 /* ******* Do not commit this file unless you know what you are doing ******* */
 
 // **Note**: default db will be create if not exist
-defaultDb = "regression_test"
 
 // add useLocalSessionState so that the jdbc will not send
 // init cmd like: select @@session.tx_read_only
 // at each time we connect.
 // add allowLoadLocalInfile so that the jdbc can execute mysql load data from client.
-jdbcUrl = "jdbc:mysql://127.0.0.1:9030/?useLocalSessionState=true&allowLoadLocalInfile=true"
-targetJdbcUrl = "jdbc:mysql://127.0.0.1:9030/?useLocalSessionState=true&allowLoadLocalInfile=true"
+jdbcUrl = "jdbc:mysql://127.0.0.1:19732/"
 jdbcUser = "root"
 jdbcPassword = ""
 

@@ -96,7 +96,7 @@ class ScriptContext implements Closeable {
 
         suiteExecutors.submit {
             suite.context.start {
-                log.info("Run ${suiteName} in ${file}".toString())
+                log.debug("Run ${suiteName} in ${file}".toString())
 
                 try {
                     // delegate closure
@@ -116,7 +116,7 @@ class ScriptContext implements Closeable {
                         throw new IllegalStateException("Run suite success callbacks failed", t)
                     }
 
-                    log.info("Run ${suiteName} in ${file.absolutePath} succeed".toString())
+                    log.debug("Run ${suiteName} in ${file.absolutePath} succeed".toString())
                 } catch (Throwable t) {
                     log.error("Run ${suiteName} in ${file.absolutePath} failed".toString(), t)
                     if (config.stopWhenFail) {

@@ -81,12 +81,12 @@ class SuiteContext implements Closeable {
 
         this.dbName = config.getDbNameByFile(file)
         // - flowName: tpcds_sf1.sql.q47.q47, flowId: tpcds_sf1/sql/q47.sql#q47
-        log.info("flowName: ${flowName}, flowId: ${flowId}".toString())
+        log.debug("flowName: ${flowName}, flowId: ${flowId}".toString())
     }
 
     String getPackageName() {
         String packageName = scriptContext.name
-        log.info("packageName: ${packageName}".toString())
+        log.debug("packageName: ${packageName}".toString())
         int dirSplitPos = packageName.lastIndexOf(File.separator)
         if (dirSplitPos != -1) {
             packageName = packageName.substring(0, dirSplitPos)
@@ -97,7 +97,7 @@ class SuiteContext implements Closeable {
 
     String getClassName() {
         String scriptFileName = scriptContext.file.name
-        log.info("scriptFileName: ${scriptFileName}".toString())
+        log.debug("scriptFileName: ${scriptFileName}".toString())
         int suffixPos = scriptFileName.lastIndexOf(".")
         String className = scriptFileName
         if (suffixPos != -1) {
@@ -211,13 +211,13 @@ class SuiteContext implements Closeable {
     public <T> T connect(String user, String password, String url, Closure<T> actionSupplier) {
         def originConnection = threadLocalConn.get()
         try {
-            log.info("Create new connection for user '${user}'")
+            log.debug("Create new connection for user '${user}'")
             return DriverManager.getConnection(url, user, password).withCloseable { newConn ->
                 threadLocalConn.set(newConn)
                 return actionSupplier.call()
             }
         } finally {
-            log.info("Recover original connection")
+            log.debug("Recover original connection")
             if (originConnection == null) {
                 threadLocalConn.remove()
             } else {
@@ -243,18 +243,18 @@ class SuiteContext implements Closeable {
             if (outputBlocksWriter != null) {
                 return outputBlocksWriter
             } else if (outputFile.exists() && deleteIfExist) {
-                log.info("Delete ${outputFile}".toString())
+                log.debug("Delete ${outputFile}".toString())
                 outputFile.delete()
-                log.info("Generate ${outputFile}".toString())
+                log.debug("Generate ${outputFile}".toString())
                 outputFile.createNewFile()
                 outputBlocksWriter = OutputUtils.writer(outputFile)
             } else if (!outputFile.exists()) {
                 outputFile.parentFile.mkdirs()
                 outputFile.createNewFile()
-                log.info("Generate ${outputFile}".toString())
+                log.debug("Generate ${outputFile}".toString())
                 outputBlocksWriter = OutputUtils.writer(outputFile)
             } else {
-                log.info("Skip generate output file because exists: ${outputFile}".toString())
+                log.debug("Skip generate output file because exists: ${outputFile}".toString())
                 outputBlocksWriter = new OutputUtils.OutputBlocksWriter(null)
             }
             return outputBlocksWriter
@@ -269,18 +269,18 @@ class SuiteContext implements Closeable {
             if (realOutputBlocksWriter != null) {
                 return realOutputBlocksWriter
             } else if (realOutputFile.exists() && deleteIfExist) {
-                log.info("Delete ${realOutputFile}".toString())
+                log.debug("Delete ${realOutputFile}".toString())
                 realOutputFile.delete()
-                log.info("Generate ${realOutputFile}".toString())
+                log.debug("Generate ${realOutputFile}".toString())
                 realOutputFile.createNewFile()
                 realOutputBlocksWriter = OutputUtils.writer(realOutputFile)
             } else if (!realOutputFile.exists()) {
                 realOutputFile.parentFile.mkdirs()
                 realOutputFile.createNewFile()
-                log.info("Generate ${realOutputFile}".toString())
+                log.debug("Generate ${realOutputFile}".toString())
                 realOutputBlocksWriter = OutputUtils.writer(realOutputFile)
             } else {
-                log.info("Skip generate output file because exists: ${realOutputFile}".toString())
+                log.debug("Skip generate output file because exists: ${realOutputFile}".toString())
                 realOutputBlocksWriter = new OutputUtils.OutputBlocksWriter(null)
             }
             return realOutputBlocksWriter

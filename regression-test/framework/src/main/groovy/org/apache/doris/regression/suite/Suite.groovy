@@ -214,7 +214,7 @@ class Suite implements GroovyInterceptable {
     }
 
     List<List<Object>> sql(String sqlStr, boolean isOrder = false) {
-        logger.info("Execute ${isOrder ? "order_" : ""}sql: ${sqlStr}".toString())
+        logger.debug("Execute ${isOrder ? "order_" : ""}sql: ${sqlStr}".toString())
         def (result, meta) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
         if (isOrder) {
             result = DataUtils.sortByToString(result)
@@ -223,7 +223,7 @@ class Suite implements GroovyInterceptable {
     }
 
     List<List<Object>> target_sql(String sqlStr, boolean isOrder = false) {
-        logger.info("Execute ${isOrder ? "order_" : ""}target_sql: ${sqlStr}".toString())
+        logger.debug("Execute ${isOrder ? "order_" : ""}target_sql: ${sqlStr}".toString())
         def (result, meta) = JdbcUtils.executeToList(context.getTargetConnection(this), sqlStr)
         if (isOrder) {
             result = DataUtils.sortByToString(result)
@@ -232,7 +232,7 @@ class Suite implements GroovyInterceptable {
     }
 
     List<List<String>> sql_meta(String sqlStr, boolean isOrder = false) {
-        logger.info("Execute ${isOrder ? "order_" : ""}sql: ${sqlStr}".toString())
+        logger.debug("Execute ${isOrder ? "order_" : ""}sql: ${sqlStr}".toString())
         def (tmp, rsmd) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
         int count = rsmd.getColumnCount();
         List<List<String>> result = new ArrayList<>()
@@ -419,7 +419,7 @@ class Suite implements GroovyInterceptable {
         if (!fromDst) {
             cmd = "scp -r ${files} ${username}@${host}:${filePath}"
         }
-        logger.info("Execute: ${cmd}".toString())
+        logger.debug("Execute: ${cmd}".toString())
         Process process = cmd.execute()
         def code = process.waitFor()
         Assert.assertEquals(0, code)
@@ -428,7 +428,7 @@ class Suite implements GroovyInterceptable {
     void sshExec(String username, String host, String cmd) {
         String command = "ssh ${username}@${host} '${cmd}'"
         def cmds = ["/bin/bash", "-c", command]
-        logger.info("Execute: ${cmds}".toString())
+        logger.debug("Execute: ${cmds}".toString())
         Process p = cmds.execute()
         def errMsg = new StringBuilder()
         def msg = new StringBuilder()
@@ -513,7 +513,7 @@ class Suite implements GroovyInterceptable {
     }
 
     PreparedStatement prepareStatement(String sql) {
-        logger.info("Execute sql: ${sql}".toString())
+        logger.debug("Execute sql: ${sql}".toString())
         return JdbcUtils.prepareStatement(context.getConnection(), sql)
     }
 
@@ -593,12 +593,12 @@ class Suite implements GroovyInterceptable {
     }
 
     void quickTest(String tag, String sql, boolean isOrder = false) {
-        logger.info("Execute tag: ${tag}, ${isOrder ? "order_" : ""}sql: ${sql}".toString())
+        logger.debug("Execute tag: ${tag}, ${isOrder ? "order_" : ""}sql: ${sql}".toString())
         quickRunTest(tag, sql, isOrder) 
     }
 
     void quickExecute(String tag, PreparedStatement stmt) {
-        logger.info("Execute tag: ${tag}, sql: ${stmt}".toString())
+        logger.debug("Execute tag: ${tag}, sql: ${stmt}".toString())
         quickRunTest(tag, stmt) 
     }
     
@@ -631,9 +631,9 @@ class Suite implements GroovyInterceptable {
     Boolean checkSnapshotFinish() {
         String checkSQL = "SHOW BACKUP FROM " + context.dbName
         int size = sql(checkSQL).size()
-        logger.info("Now size is ${size}")
+        logger.debug("Now size is ${size}")
         List<Object> row = sql(checkSQL)[size-1]
-        logger.info("Now row is ${row}")
+        logger.debug("Now row is ${row}")
 
         return (row[3] as String) == "FINISHED"
     }
@@ -641,9 +641,9 @@ class Suite implements GroovyInterceptable {
     Boolean checkRestoreFinish() {
         String checkSQL = "SHOW RESTORE FROM " + context.dbName
         int size = sql(checkSQL).size()
-        logger.info("Now size is ${size}")
+        logger.debug("Now size is ${size}")
         List<Object> row = sql(checkSQL)[size-1]
-        logger.info("Now row is ${row}")
+        logger.debug("Now row is ${row}")
 
         return (row[4] as String) == "FINISHED"
     }

@@ -45,7 +45,7 @@ abstract class SuiteScript extends Script {
             return
         }
 
-        log.info("run ${context.file.absolutePath}")
+        log.debug("run ${context.file.absolutePath}")
         try {
             context.createAndRunSuite(suiteName, group, suiteBody)
         } catch (Throwable t) {

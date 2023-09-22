@@ -64,21 +64,21 @@ class RegressionTest {
         initGroovyEnv(config)
         boolean success = true
         for (int i = 0; i < config.times; i++) {
-            log.info("=== run ${i} time ===")
+            log.debug("=== run ${i} time ===")
             Recorder recorder = runScripts(config)
             success = printResult(config, recorder)
         }
         actionExecutors.shutdown()
         suiteExecutors.shutdown()
         scriptExecutors.shutdown()
-        log.info("Test finished")
+        log.debug("Test finished")
         if (!success) {
             System.exit(1)
         }
     }
 
     static void initGroovyEnv(Config config) {
-        log.info("parallel = ${config.parallel}, suiteParallel = ${config.suiteParallel}, actionParallel = ${config.actionParallel}")
+        log.debug("parallel = ${config.parallel}, suiteParallel = ${config.suiteParallel}, actionParallel = ${config.actionParallel}")
         classloader = new GroovyClassLoader()
         compileConfig = new CompilerConfiguration()
         compileConfig.setScriptBaseClass((SuiteScript as Class).name)
@@ -166,7 +166,7 @@ class RegressionTest {
 
         List<Future> futures = Lists.newArrayList()
         scriptSources.eachWithIndex { source, i ->
-//            log.info("Prepare scripts [${i + 1}/${totalFile}]".toString())
+//            log.debug("Prepare scripts [${i + 1}/${totalFile}]".toString())
             def future = scriptExecutors.submit {
                 runScript(config, source, recorder)
             }
@@ -187,11 +187,11 @@ class RegressionTest {
         def recorder = new Recorder()
         def directoryFilter = config.getDirectoryFilter()
         if (!config.withOutLoadData) {
-            log.info('Start to run load scripts')
+            log.debug('Start to run load scripts')
             runScripts(config, recorder, directoryFilter,
                     { fileName -> fileName.substring(0, fileName.lastIndexOf(".")) == "load" })
         }
-        log.info('Start to run scripts')
+        log.debug('Start to run scripts')
         runScripts(config, recorder, directoryFilter,
                 { fileName -> fileName.substring(0, fileName.lastIndexOf(".")) != "load" })
         return recorder
@@ -271,13 +271,13 @@ class RegressionTest {
             String successList = recorder.successList.collect { info ->
                 "${info.file.absolutePath}: group=${info.group}, name=${info.suiteName}"
             }.join('\n')
-            log.info("Success suites:\n${successList}".toString())
+            log.debug("Success suites:\n${successList}".toString())
         }
 
         // print skipped list
         if (!recorder.skippedList.isEmpty()) {
             String skippedList = recorder.skippedList.collect { info -> "${info}" }.join('\n')
-            log.info("Skipped suites:\n${skippedList}".toString())
+            log.debug("Skipped suites:\n${skippedList}".toString())
         }
 
         boolean pass = false;
@@ -287,13 +287,13 @@ class RegressionTest {
                 def failureList = recorder.failureList.collect() { info ->
                     "${info.file.absolutePath}: group=${info.group}, name=${info.suiteName}"
                 }.join('\n')
-                log.info("Failure suites:\n${failureList}".toString())
+                log.debug("Failure suites:\n${failureList}".toString())
             }
             if (!recorder.fatalScriptList.isEmpty()) {
                 def failureList = recorder.fatalScriptList.collect() { info ->
                     "${info.file.absolutePath}"
                 }.join('\n')
-                log.info("Fatal scripts:\n${failureList}".toString())
+                log.debug("Fatal scripts:\n${failureList}".toString())
             }
             printFailed()
         } else {
@@ -301,7 +301,7 @@ class RegressionTest {
             pass = true;
         }
 
-        log.info("Test ${allSuiteNum} suites, failed ${failedSuiteNum} suites, fatal ${fatalScriptNum} scripts, skipped ${skippedNum} scripts".toString())
+        log.debug("Test ${allSuiteNum} suites, failed ${failedSuiteNum} suites, fatal ${fatalScriptNum} scripts, skipped ${skippedNum} scripts".toString())
         return pass;
     }
 
@@ -321,9 +321,9 @@ class RegressionTest {
                 context.start({
                     try {
                         SuiteScript pluginScript = new GroovyFileSource(pluginFile).toScript(context, shell)
-                        log.info("Begin to load plugin: ${pluginFile.getCanonicalPath()}")
+                        log.debug("Begin to load plugin: ${pluginFile.getCanonicalPath()}")
                         pluginScript.run()
-                        log.info("Loaded plugin: ${pluginFile.getCanonicalPath()}")
+                        log.debug("Loaded plugin: ${pluginFile.getCanonicalPath()}")
                     } catch (Throwable t) {
                         log.error("Load plugin failed: ${pluginFile.getCanonicalPath()}", t)
                     }
@@ -333,7 +333,7 @@ class RegressionTest {
     }
 
     static void printPassed() {
-        log.info('''All suites success.
+        log.debug('''All suites success.
                  | ____   _    ____ ____  _____ ____
                  ||  _ \\ / \\  / ___/ ___|| ____|  _ \\
                  || |_) / _ \\ \\___ \\___ \\|  _| | | | |
@@ -343,7 +343,7 @@ class RegressionTest {
     }
 
     static void printFailed() {
-        log.info('''Some suites failed.
+        log.debug('''Some suites failed.
                  | _____ _    ___ _     _____ ____
                  ||  ___/ \\  |_ _| |   | ____|  _ \\
                  || |_ / _ \\  | || |   |  _| | | | |
