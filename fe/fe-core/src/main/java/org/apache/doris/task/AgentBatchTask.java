@@ -19,6 +19,7 @@ package org.apache.doris.task;
 
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.ClientPool;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.BackendService;
@@ -48,6 +49,7 @@ import org.apache.doris.thrift.TTaskType;
 import org.apache.doris.thrift.TUpdateTabletMetaInfoReq;
 import org.apache.doris.thrift.TUploadReq;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -158,25 +160,32 @@ public class AgentBatchTask implements Runnable {
                 if (backend == null || !backend.isAlive()) {
                     continue;
                 }
-                List<AgentTask> tasks = this.backendIdToTasks.get(backendId);
+
+                List<List<AgentTask>> subTasksSet = Lists.partition(this.backendIdToTasks.get(backendId),
+                        Config.max_agent_task_num_per_batch);
+
                 // create AgentClient
                 String host = FeConstants.runningUnitTest ? "127.0.0.1" : backend.getHost();
                 address = new TNetworkAddress(host, backend.getBePort());
                 client = ClientPool.backendPool.borrowObject(address);
-                List<TAgentTaskRequest> agentTaskRequests = new LinkedList<TAgentTaskRequest>();
-                for (AgentTask task : tasks) {
-                    try {
-                        agentTaskRequests.add(toAgentTaskRequest(task));
-                    } catch (Exception e) {
-                        task.failed();
-                        throw e;
+
+                for (List<AgentTask> subTasks : subTasksSet) {
+                    List<TAgentTaskRequest> agentTaskRequests = new LinkedList<TAgentTaskRequest>();
+                    for (AgentTask task : subTasks) {
+                        try {
+                            agentTaskRequests.add(toAgentTaskRequest(task));
+                        } catch (Exception e) {
+                            task.failed();
+                            throw e;
+                        }
                     }
-                }
-                client.submitTasks(agentTaskRequests);
-                if (LOG.isDebugEnabled()) {
-                    for (AgentTask task : tasks) {
-                        LOG.debug("send task: type[{}], backend[{}], signature[{}]",
-                                task.getTaskType(), backendId, task.getSignature());
+                    Preconditions.checkState(agentTaskRequests.size() > 0);
+                    client.submitTasks(agentTaskRequests);
+                    if (LOG.isDebugEnabled()) {
+                        for (AgentTask task : subTasks) {
+                            LOG.debug("send task: type[{}], backend[{}], signature[{}] subTasks[{}]",
+                                    task.getTaskType(), backendId, task.getSignature(), subTasks.size());
+                        }
                     }
                 }
                 ok = true;

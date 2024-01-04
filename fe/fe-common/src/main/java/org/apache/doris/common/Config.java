@@ -2395,4 +2395,7 @@ public class Config extends ConfigBase {
     public static boolean enable_profile_when_analyze = false;
     @ConfField(mutable = true)
     public static boolean enable_collect_internal_query_profile = false;
+
+    @ConfField(mutable = true)
+    public static int max_agent_task_num_per_batch = 1000;
 }
