@@ -644,50 +644,13 @@ void MetaServiceImpl::get_rl_task_commit_attach(::google::protobuf::RpcControlle
     }
 }
 
-/**
- * 0. Extract txn_id from request
- * 1. Get db id from TxnKv with txn_id
- * 2. Get TxnInfo from TxnKv with db_id and txn_id
- * 3. Get tmp rowset meta, there may be several or hundred of tmp rowsets
- * 4. Get versions of each rowset
- * 5. Put rowset meta, which will be visible to user
- * 6. Put TxnInfo back into TxnKv with updated txn status (committed)
- * 7. Update versions of each partition
- * 8. Remove tmp rowset meta
- *
- * Note: getting version and all changes maded are in a single TxnKv transaction:
- *       step 5, 6, 7, 8
- */
-void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
-                                 const CommitTxnRequest* request, CommitTxnResponse* response,
-                                 ::google::protobuf::Closure* done) {
-    if (request->has_is_txn_load() && request->is_txn_load()) {
-        commit_txn_with_sub_txn(controller, request, response, done);
-        return;
-    }
-    RPC_PREPROCESS(commit_txn);
-    if (!request->has_txn_id()) {
-        code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = "invalid argument, missing txn id";
-        return;
-    }
-
-    int64_t txn_id = request->txn_id();
-
-    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
-    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
-    if (instance_id.empty()) {
-        code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = "empty instance_id";
-        LOG(INFO) << msg << ", cloud_unique_id=" << cloud_unique_id << " txn_id=" << txn_id;
-        return;
-    }
-
-    RPC_RATE_LIMIT(commit_txn)
-
+void scan_tmp_rowset(
+        const std::string& instance_id, int64_t txn_id, std::shared_ptr<TxnKv> txn_kv,
+        MetaServiceCode& code, std::string& msg, std::stringstream& ss, int64_t* db_id,
+        std::vector<std::pair<std::string, doris::RowsetMetaCloudPB>>* tmp_rowsets_meta) {
     // Create a readonly txn for scan tmp rowset
     std::unique_ptr<Transaction> txn;
-    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    TxnErrorCode err = txn_kv->create_txn(&txn);
     if (err != TxnErrorCode::TXN_OK) {
         code = cast_as<ErrCategory::CREATE>(err);
         ss << "filed to create txn, txn_id=" << txn_id << " err=" << err;
@@ -696,7 +659,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
         return;
     }
 
-    //Get db id with txn id
+    // Get db id with txn id
     std::string index_val;
     const std::string index_key = txn_index_key({instance_id, txn_id});
     err = txn->get(index_key, &index_val);
@@ -719,7 +682,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
 
     DCHECK(index_pb.has_tablet_index() == true);
     DCHECK(index_pb.tablet_index().has_db_id() == true);
-    int64_t db_id = index_pb.tablet_index().db_id();
+    *db_id = index_pb.tablet_index().db_id();
 
     // Get temporary rowsets involved in the txn
     // This is a range scan
@@ -729,9 +692,6 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     std::string rs_tmp_key1;
     meta_rowset_tmp_key(rs_tmp_key_info0, &rs_tmp_key0);
     meta_rowset_tmp_key(rs_tmp_key_info1, &rs_tmp_key1);
-    // Get rowset meta that should be commited
-    //                   tmp_rowset_key -> rowset_meta
-    std::vector<std::pair<std::string, doris::RowsetMetaCloudPB>> tmp_rowsets_meta;
 
     int num_rowsets = 0;
     std::unique_ptr<int, std::function<void(int*)>> defer_log_range(
@@ -745,7 +705,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     do {
         err = txn->get(rs_tmp_key0, rs_tmp_key1, &it, true);
         if (err == TxnErrorCode::TXN_TOO_OLD) {
-            err = txn_kv_->create_txn(&txn);
+            err = txn_kv->create_txn(&txn);
             if (err == TxnErrorCode::TXN_OK) {
                 err = txn->get(rs_tmp_key0, rs_tmp_key1, &it, true);
             }
@@ -762,8 +722,8 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
         while (it->has_next()) {
             auto [k, v] = it->next();
             LOG(INFO) << "range_get rowset_tmp_key=" << hex(k) << " txn_id=" << txn_id;
-            tmp_rowsets_meta.emplace_back();
-            if (!tmp_rowsets_meta.back().second.ParseFromArray(v.data(), v.size())) {
+            tmp_rowsets_meta->emplace_back();
+            if (!tmp_rowsets_meta->back().second.ParseFromArray(v.data(), v.size())) {
                 code = MetaServiceCode::PROTOBUF_PARSE_ERR;
                 ss << "malformed rowset meta, unable to initialize, txn_id=" << txn_id
                    << " key=" << hex(k);
@@ -772,18 +732,250 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
                 return;
             }
             // Save keys that will be removed later
-            tmp_rowsets_meta.back().first = std::string(k.data(), k.size());
+            tmp_rowsets_meta->back().first = std::string(k.data(), k.size());
             ++num_rowsets;
             if (!it->has_next()) rs_tmp_key0 = k;
         }
         rs_tmp_key0.push_back('\x00'); // Update to next smallest key for iteration
     } while (it->more());
 
-    VLOG_DEBUG << "txn_id=" << txn_id << " tmp_rowsets_meta.size()=" << tmp_rowsets_meta.size();
+    VLOG_DEBUG << "txn_id=" << txn_id << " tmp_rowsets_meta.size()=" << tmp_rowsets_meta->size();
+}
 
-    // Create a read/write txn for guarantee consistency
-    txn.reset();
-    err = txn_kv_->create_txn(&txn);
+void convert_tmp_rowsets(
+        const std::string& instance_id, int64_t txn_id, std::shared_ptr<TxnKv> txn_kv,
+        MetaServiceCode& code, std::string& msg, std::stringstream& ss, int64_t db_id,
+        std::vector<std::pair<std::string, doris::RowsetMetaCloudPB>>& tmp_rowsets_meta) {
+    std::unique_ptr<Transaction> txn;
+
+    // Update stats of affected tablet
+    std::deque<std::string> kv_pool;
+    std::function<void(const StatsTabletKeyInfo&, const TabletStats&)> update_tablet_stats;
+    if (config::split_tablet_stats) {
+        update_tablet_stats = [&](const StatsTabletKeyInfo& info, const TabletStats& stats) {
+            if (stats.num_segs > 0) {
+                auto& data_size_key = kv_pool.emplace_back();
+                stats_tablet_data_size_key(info, &data_size_key);
+                txn->atomic_add(data_size_key, stats.data_size);
+                auto& num_rows_key = kv_pool.emplace_back();
+                stats_tablet_num_rows_key(info, &num_rows_key);
+                txn->atomic_add(num_rows_key, stats.num_rows);
+                auto& num_segs_key = kv_pool.emplace_back();
+                stats_tablet_num_segs_key(info, &num_segs_key);
+                txn->atomic_add(num_segs_key, stats.num_segs);
+            }
+            auto& num_rowsets_key = kv_pool.emplace_back();
+            stats_tablet_num_rowsets_key(info, &num_rowsets_key);
+            txn->atomic_add(num_rowsets_key, stats.num_rowsets);
+        };
+    } else {
+        update_tablet_stats = [&](const StatsTabletKeyInfo& info, const TabletStats& stats) {
+            auto& key = kv_pool.emplace_back();
+            stats_tablet_key(info, &key);
+            auto& val = kv_pool.emplace_back();
+            TxnErrorCode err = txn->get(key, &val);
+            if (err != TxnErrorCode::TXN_OK) {
+                code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TABLET_NOT_FOUND
+                                                              : cast_as<ErrCategory::READ>(err);
+                msg = fmt::format("failed to get tablet stats, err={} tablet_id={}", err,
+                                  std::get<4>(info));
+                return;
+            }
+            TabletStatsPB stats_pb;
+            if (!stats_pb.ParseFromString(val)) {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                msg = fmt::format("malformed tablet stats value, key={}", hex(key));
+                return;
+            }
+            stats_pb.set_data_size(stats_pb.data_size() + stats.data_size);
+            stats_pb.set_num_rows(stats_pb.num_rows() + stats.num_rows);
+            stats_pb.set_num_rowsets(stats_pb.num_rowsets() + stats.num_rowsets);
+            stats_pb.set_num_segments(stats_pb.num_segments() + stats.num_segs);
+            stats_pb.SerializeToString(&val);
+            txn->put(key, val);
+        };
+    }
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
+        ss << "filed to create txn, txn_id=" << txn_id << " err=" << err;
+        msg = ss.str();
+        LOG(WARNING) << msg;
+        return;
+    }
+
+    std::unordered_map<int64_t, TabletIndexPB> tablet_ids;
+    // tablet_id -> stats
+    std::unordered_map<int64_t, TabletStats> tablet_stats;
+    for (auto& [tmp_rowset_key, tmp_rowset_pb] : tmp_rowsets_meta) {
+        std::string tmp_rowst_data;
+        err = txn->get(tmp_rowset_key, &tmp_rowst_data);
+        if (TxnErrorCode::TXN_KEY_NOT_FOUND == err) {
+            // the tmp rowset has been converted
+            continue;
+        }
+
+        std::string tablet_idx_key;
+        meta_tablet_idx_key({instance_id, tmp_rowset_pb.tablet_id()}, &tablet_idx_key);
+        std::string tablet_idx_val;
+        err = txn->get(tablet_idx_key, &tablet_idx_val);
+        if (TxnErrorCode::TXN_OK != err) {
+            code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TXN_ID_NOT_FOUND
+                                                          : cast_as<ErrCategory::READ>(err);
+            ss << "failed to get tablet idx, txn_id=" << txn_id << " key=" << hex(tablet_idx_key)
+               << " err=" << err;
+            msg = ss.str();
+            LOG(WARNING) << msg;
+        }
+
+        TabletIndexPB tablet_idx_pb;
+        if (!tablet_idx_pb.ParseFromString(tablet_idx_val)) {
+            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            ss << "failed to parse tablet idx pb txn_id=" << txn_id
+               << " key=" << hex(tablet_idx_key);
+            msg = ss.str();
+            return;
+        }
+
+        if (tablet_ids.find(tmp_rowset_pb.tablet_id()) == tablet_ids.end()) {
+            tablet_ids.emplace(tmp_rowset_pb.tablet_id(), tablet_idx_pb);
+        }
+
+        std::string ver_val;
+        std::string ver_key = partition_version_key(
+                {instance_id, db_id, tablet_idx_pb.table_id(), tmp_rowset_pb.partition_id()});
+        err = txn->get(ver_key, &ver_val);
+        if (TxnErrorCode::TXN_OK != err) {
+            code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TXN_ID_NOT_FOUND
+                                                          : cast_as<ErrCategory::READ>(err);
+            ss << "failed to get partiton version, txn_id=" << txn_id << " key=" << hex(ver_key)
+               << " err=" << err;
+            msg = ss.str();
+            LOG(WARNING) << msg;
+        }
+        VersionPB version_pb;
+        if (!version_pb.ParseFromString(ver_val)) {
+            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            ss << "failed to parse version pb txn_id=" << txn_id << " key=" << hex(ver_key);
+            msg = ss.str();
+            return;
+        }
+        DCHECK(version_pb.has_txn_id());
+        DCHECK(version_pb.txn_id() == txn_id);
+        tmp_rowset_pb.set_start_version(version_pb.version());
+        tmp_rowset_pb.set_end_version(version_pb.version());
+        std::string rowset_key = meta_rowset_key(
+                {instance_id, tmp_rowset_pb.tablet_id(), tmp_rowset_pb.end_version()});
+        std::string rowset_val;
+        if (!tmp_rowset_pb.SerializeToString(&rowset_val)) {
+            code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+            ss << "failed to serialize rowset_meta, txn_id=" << txn_id
+               << " key=" << hex(rowset_key);
+            msg = ss.str();
+            return;
+        }
+
+        txn->put(rowset_key, rowset_val);
+        LOG(INFO) << "xxx put rowset_key=" << hex(rowset_key) << " txn_id=" << txn_id
+                  << " rowset_size=" << rowset_key.size() + rowset_val.size();
+
+        // Accumulate affected rows
+        auto& stats = tablet_stats[tmp_rowset_pb.tablet_id()];
+        stats.data_size += tmp_rowset_pb.data_disk_size();
+        stats.num_rows += tmp_rowset_pb.num_rows();
+        ++stats.num_rowsets;
+        stats.num_segs += tmp_rowset_pb.num_segments();
+    }
+
+    for (auto& [tablet_id, stats] : tablet_stats) {
+        DCHECK(tablet_ids.count(tablet_id));
+        auto& tablet_idx = tablet_ids[tablet_id];
+        StatsTabletKeyInfo info {instance_id, tablet_idx.table_id(), tablet_idx.index_id(),
+                                 tablet_idx.partition_id(), tablet_id};
+        update_tablet_stats(info, stats);
+        if (code != MetaServiceCode::OK) return;
+    }
+
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        ss << "failed to commit kv txn, txn_id=" << txn_id << " err=" << err;
+        msg = ss.str();
+        return;
+    }
+}
+
+void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
+                                 const CommitTxnRequest* request, CommitTxnResponse* response,
+                                 ::google::protobuf::Closure* done)
+
+{
+    RPC_PREPROCESS(commit_txn);
+    if (!request->has_txn_id()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "invalid argument, missing txn id";
+        return;
+    }
+
+    int64_t txn_id = request->txn_id();
+    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
+    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        LOG(INFO) << msg << ", cloud_unique_id=" << cloud_unique_id << " txn_id=" << txn_id;
+        return;
+    }
+    RPC_RATE_LIMIT(commit_txn)
+
+    if (request->has_is_txn_load() && request->is_txn_load()) {
+        commit_txn_with_sub_txn(controller, request, response, done, code, msg, ss, instance_id);
+        return;
+    }
+
+    int64_t db_id;
+    // Get rowset meta that should be commited, tmp_rowset_key -> rowset_meta
+    std::vector<std::pair<std::string, doris::RowsetMetaCloudPB>> tmp_rowsets_meta;
+    scan_tmp_rowset(instance_id, txn_id, txn_kv_, code, msg, ss, &db_id, &tmp_rowsets_meta);
+    if (code != MetaServiceCode::OK) {
+        return;
+    }
+
+    if (config::enable_txn_lazy_commit &&
+        tmp_rowsets_meta.size() >= config::txn_lazy_commit_thresold) {
+        commit_txn_v2(controller, request, response, done, code, msg, ss, instance_id, db_id,
+                      tmp_rowsets_meta);
+        return;
+    }
+
+    commit_txn_v1(controller, request, response, done, code, msg, ss, instance_id, db_id,
+                  tmp_rowsets_meta);
+    return;
+}
+
+/**
+ * 0. Extract txn_id from request
+ * 1. Get db id from TxnKv with txn_id
+ * 2. Get TxnInfo from TxnKv with db_id and txn_id
+ * 3. Get tmp rowset meta, there may be several or hundred of tmp rowsets
+ * 4. Get versions of each rowset
+ * 5. Put rowset meta, which will be visible to user
+ * 6. Put TxnInfo back into TxnKv with updated txn status (committed)
+ * 7. Update versions of each partition
+ * 8. Remove tmp rowset meta
+ *
+ * Note: getting version and all changes maded are in a single TxnKv transaction:
+ *       step 5, 6, 7, 8
+ */
+void MetaServiceImpl::commit_txn_v1(
+        ::google::protobuf::RpcController* controller, const CommitTxnRequest* request,
+        CommitTxnResponse* response, ::google::protobuf::Closure* done, MetaServiceCode& code,
+        std::string& msg, std::stringstream& ss, const std::string& instance_id, int64_t db_id,
+        std::vector<std::pair<std::string, doris::RowsetMetaCloudPB>>& tmp_rowsets_meta) {
+    int64_t txn_id = request->txn_id();
+    // Create a readonly txn for scan tmp rowset
+    std::unique_ptr<Transaction> txn;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
     if (err != TxnErrorCode::TXN_OK) {
         code = cast_as<ErrCategory::CREATE>(err);
         ss << "filed to create txn, txn_id=" << txn_id << " err=" << err;
@@ -1238,6 +1430,417 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     response->mutable_txn_info()->CopyFrom(txn_info);
 } // end commit_txn
 
+void MetaServiceImpl::commit_txn_v2(
+        ::google::protobuf::RpcController* controller, const CommitTxnRequest* request,
+        CommitTxnResponse* response, ::google::protobuf::Closure* done, MetaServiceCode& code,
+        std::string& msg, std::stringstream& ss, const std::string& instance_id, int64_t db_id,
+        std::vector<std::pair<std::string, doris::RowsetMetaCloudPB>>& tmp_rowsets_meta) {
+    bool need_commit_last_txn = false;
+    TxnErrorCode err = TxnErrorCode::TXN_OK;
+    do {
+        int64_t txn_id = request->txn_id();
+        std::unique_ptr<Transaction> txn;
+        err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::CREATE>(err);
+            ss << "filed to create txn, txn_id=" << txn_id << " err=" << err;
+            msg = ss.str();
+            LOG(WARNING) << msg;
+            return;
+        }
+
+        // Prepare rowset meta and new_versions
+        // Read tablet indexes in batch.
+        std::vector<std::string> tablet_idx_keys;
+        for (auto& [_, i] : tmp_rowsets_meta) {
+            tablet_idx_keys.push_back(meta_tablet_idx_key({instance_id, i.tablet_id()}));
+        }
+        std::vector<std::optional<std::string>> tablet_idx_values;
+        err = txn->batch_get(&tablet_idx_values, tablet_idx_keys,
+                             Transaction::BatchGetOptions(false));
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
+            ss << "failed to get tablet table index ids, err=" << err;
+            msg = ss.str();
+            LOG(WARNING) << msg << " txn_id=" << txn_id;
+            return;
+        }
+
+        // tablet_id -> {table/index/partition}_id
+        std::unordered_map<int64_t, TabletIndexPB> tablet_ids;
+        // table_id -> tablets_ids
+        std::unordered_map<int64_t, std::vector<int64_t>> table_id_tablet_ids;
+        for (size_t i = 0; i < tmp_rowsets_meta.size(); i++) {
+            uint64_t tablet_id = tmp_rowsets_meta[i].second.tablet_id();
+            if (!tablet_idx_values[i].has_value()) [[unlikely]] {
+                // The value must existed
+                code = MetaServiceCode::KV_TXN_GET_ERR;
+                ss << "failed to get tablet table index ids, err=not found"
+                   << " tablet_id=" << tablet_id << " key=" << hex(tablet_idx_keys[i]);
+                msg = ss.str();
+                LOG(WARNING) << msg << " err=" << err << " txn_id=" << txn_id;
+                return;
+            }
+            if (!tablet_ids[tablet_id].ParseFromString(tablet_idx_values[i].value())) [[unlikely]] {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                ss << "malformed tablet index value tablet_id=" << tablet_id
+                   << " txn_id=" << txn_id;
+                msg = ss.str();
+                LOG(WARNING) << msg;
+                return;
+            }
+            table_id_tablet_ids[tablet_ids[tablet_id].table_id()].push_back(tablet_id);
+            VLOG_DEBUG << "tablet_id:" << tablet_id
+                       << " value:" << tablet_ids[tablet_id].ShortDebugString();
+        }
+
+        tablet_idx_keys.clear();
+        tablet_idx_values.clear();
+
+        std::unordered_map<std::string, uint64_t> new_versions;
+        std::vector<std::string> version_keys;
+        for (auto& [_, i] : tmp_rowsets_meta) {
+            int64_t tablet_id = i.tablet_id();
+            int64_t table_id = tablet_ids[tablet_id].table_id();
+            int64_t partition_id = i.partition_id();
+            std::string ver_key =
+                    partition_version_key({instance_id, db_id, table_id, partition_id});
+            if (new_versions.count(ver_key) == 0) {
+                new_versions.insert({ver_key, 0});
+                version_keys.push_back(std::move(ver_key));
+            }
+        }
+
+        std::vector<std::optional<std::string>> version_values;
+        err = txn->batch_get(&version_values, version_keys);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
+            ss << "failed to get partition versions, err=" << err;
+            msg = ss.str();
+            LOG(WARNING) << msg << " txn_id=" << txn_id;
+            return;
+        }
+
+        for (size_t i = 0; i < version_keys.size(); i++) {
+            int64_t version;
+            if (version_values[i].has_value()) {
+                VersionPB version_pb;
+                if (!version_pb.ParseFromString(version_values[i].value())) {
+                    code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                    ss << "failed to parse version pb txn_id=" << txn_id
+                       << " key=" << hex(version_keys[i]);
+                    msg = ss.str();
+                    return;
+                }
+                if (version_pb.has_txn_id()) {
+                    // todo
+                    need_commit_last_txn = true;
+                    break;
+                }
+                version = version_pb.version();
+            } else {
+                version = 1;
+            }
+            new_versions[version_keys[i]] = version + 1;
+            need_commit_last_txn = false;
+        }
+
+        if (need_commit_last_txn) {
+            // todo submit last txn task and wait
+        }
+
+        // todo modify txn info and partition version
+        // Get txn info with db_id and txn_id
+        std::string info_val; // Will be reused when saving updated txn
+        const std::string info_key = txn_info_key({instance_id, db_id, txn_id});
+        err = txn->get(info_key, &info_val);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TXN_ID_NOT_FOUND
+                                                          : cast_as<ErrCategory::READ>(err);
+            ss << "failed to get txn_info, db_id=" << db_id << " txn_id=" << txn_id
+               << " err=" << err;
+            msg = ss.str();
+            LOG(WARNING) << msg;
+            return;
+        }
+
+        TxnInfoPB txn_info;
+        if (!txn_info.ParseFromString(info_val)) {
+            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            ss << "failed to parse txn_info, db_id=" << db_id << " txn_id=" << txn_id;
+            msg = ss.str();
+            LOG(WARNING) << msg;
+            return;
+        }
+
+        // TODO: do more check like txn state, 2PC etc.
+        DCHECK(txn_info.txn_id() == txn_id);
+        if (txn_info.status() == TxnStatusPB::TXN_STATUS_ABORTED) {
+            code = MetaServiceCode::TXN_ALREADY_ABORTED;
+            ss << "transaction is already aborted: db_id=" << db_id << " txn_id=" << txn_id;
+            msg = ss.str();
+            LOG(WARNING) << msg;
+            return;
+        }
+
+        if (txn_info.status() == TxnStatusPB::TXN_STATUS_VISIBLE) {
+            code = MetaServiceCode::TXN_ALREADY_VISIBLE;
+            if (request->has_is_2pc() && request->is_2pc()) {
+                ss << "transaction [" << txn_id << "] is already visible, not pre-committed.";
+                msg = ss.str();
+                response->mutable_txn_info()->CopyFrom(txn_info);
+                return;
+            }
+            ss << "transaction is already visible: db_id=" << db_id << " txn_id=" << txn_id;
+            msg = ss.str();
+            response->mutable_txn_info()->CopyFrom(txn_info);
+            return;
+        }
+
+        if (request->has_is_2pc() && request->is_2pc() &&
+            txn_info.status() == TxnStatusPB::TXN_STATUS_PREPARED) {
+            code = MetaServiceCode::TXN_INVALID_STATUS;
+            ss << "transaction is prepare, not pre-committed: db_id=" << db_id << " txn_id"
+               << txn_id;
+            msg = ss.str();
+            LOG(WARNING) << msg;
+            return;
+        }
+        LOG(INFO) << "txn_id=" << txn_id << " txn_info=" << txn_info.ShortDebugString();
+        // Update txn_info
+        txn_info.set_status(TxnStatusPB::TXN_STATUS_VISIBLE);
+
+        auto now_time = system_clock::now();
+        uint64_t commit_time = duration_cast<milliseconds>(now_time.time_since_epoch()).count();
+        if ((txn_info.prepare_time() + txn_info.timeout_ms()) < commit_time) {
+            code = MetaServiceCode::UNDEFINED_ERR;
+            msg = fmt::format("txn is expired, not allow to commit txn_id={}", txn_id);
+            LOG(INFO) << msg << " prepare_time=" << txn_info.prepare_time()
+                      << " timeout_ms=" << txn_info.timeout_ms() << " commit_time=" << commit_time;
+            return;
+        }
+        txn_info.set_commit_time(commit_time);
+        txn_info.set_finish_time(commit_time);
+        if (request->has_commit_attachment()) {
+            txn_info.mutable_commit_attachment()->CopyFrom(request->commit_attachment());
+        }
+        LOG(INFO) << "after update txn_info=" << txn_info.ShortDebugString();
+        info_val.clear();
+        if (!txn_info.SerializeToString(&info_val)) {
+            code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+            ss << "failed to serialize txn_info when saving, txn_id=" << txn_id;
+            msg = ss.str();
+            return;
+        }
+        txn->put(info_key, info_val);
+        LOG(INFO) << "xxx put info_key=" << hex(info_key) << " txn_id=" << txn_id;
+
+        const std::string running_key = txn_running_key({instance_id, db_id, txn_id});
+        LOG(INFO) << "xxx remove running_key=" << hex(running_key) << " txn_id=" << txn_id;
+        txn->remove(running_key);
+
+        std::string recycle_val;
+        std::string recycle_key = recycle_txn_key({instance_id, db_id, txn_id});
+        RecycleTxnPB recycle_pb;
+        recycle_pb.set_creation_time(commit_time);
+        recycle_pb.set_label(txn_info.label());
+
+        if (!recycle_pb.SerializeToString(&recycle_val)) {
+            code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+            ss << "failed to serialize recycle_pb, txn_id=" << txn_id;
+            msg = ss.str();
+            return;
+        }
+        txn->put(recycle_key, recycle_val);
+
+        if (txn_info.load_job_source_type() ==
+            LoadJobSourceTypePB::LOAD_JOB_SRC_TYPE_ROUTINE_LOAD_TASK) {
+            put_routine_load_progress(code, msg, instance_id, request, txn.get(), db_id);
+        }
+
+        // Save versions
+        for (auto& i : new_versions) {
+            std::string ver_val;
+            VersionPB version_pb;
+            version_pb.set_version(i.second);
+            version_pb.set_txn_id(txn_id);
+            if (!version_pb.SerializeToString(&ver_val)) {
+                code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+                ss << "failed to serialize version_pb when saving, txn_id=" << txn_id;
+                msg = ss.str();
+                return;
+            }
+
+            txn->put(i.first, ver_val);
+            LOG(INFO) << "xxx put partition_version_key=" << hex(i.first) << " version:" << i.second
+                      << " txn_id=" << txn_id;
+
+            std::string_view ver_key = i.first;
+            ver_key.remove_prefix(1); // Remove key space
+            // PartitionVersionKeyInfo  {instance_id, db_id, table_id, partition_id}
+            std::vector<std::tuple<std::variant<int64_t, std::string>, int, int>> out;
+            int ret = decode_key(&ver_key, &out);
+            if (ret != 0) [[unlikely]] {
+                // decode version key error means this is something wrong,
+                // we can not continue this txn
+                LOG(WARNING) << "failed to decode key, ret=" << ret << " key=" << hex(ver_key);
+                code = MetaServiceCode::UNDEFINED_ERR;
+                msg = "decode version key error";
+                return;
+            }
+
+            int64_t table_id = std::get<int64_t>(std::get<0>(out[4]));
+            int64_t partition_id = std::get<int64_t>(std::get<0>(out[5]));
+            VLOG_DEBUG << "txn_id=" << txn_id << " table_id=" << table_id
+                       << " partition_id=" << partition_id << " version=" << i.second;
+
+            response->add_table_ids(table_id);
+            response->add_partition_ids(partition_id);
+            response->add_versions(i.second);
+        }
+
+        // process mow table, check lock and remove pending key
+        std::vector<std::string> lock_keys;
+        lock_keys.reserve(request->mow_table_ids().size());
+        for (auto table_id : request->mow_table_ids()) {
+            lock_keys.push_back(meta_delete_bitmap_update_lock_key({instance_id, table_id, -1}));
+        }
+        std::vector<std::optional<std::string>> lock_values;
+        err = txn->batch_get(&lock_values, lock_keys);
+        if (err != TxnErrorCode::TXN_OK) {
+            ss << "failed to get delete bitmap update lock key info, instance_id=" << instance_id
+               << " err=" << err;
+            msg = ss.str();
+            code = cast_as<ErrCategory::READ>(err);
+            LOG(WARNING) << msg << " txn_id=" << txn_id;
+            return;
+        }
+
+        for (size_t i = 0; i < lock_keys.size(); i++) {
+            int64_t table_id = request->mow_table_ids(i);
+            // When the key does not exist, it means the lock has been acquired
+            // by another transaction and successfully committed.
+            if (!lock_values[i].has_value()) {
+                ss << "get delete bitmap update lock info, lock is expired"
+                   << " table_id=" << table_id << " key=" << hex(lock_keys[i]);
+                code = MetaServiceCode::LOCK_EXPIRED;
+                msg = ss.str();
+                LOG(WARNING) << msg << " txn_id=" << txn_id;
+                return;
+            }
+
+            DeleteBitmapUpdateLockPB lock_info;
+            if (!lock_info.ParseFromString(lock_values[i].value())) [[unlikely]] {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                msg = "failed to parse DeleteBitmapUpdateLockPB";
+                LOG(WARNING) << msg << " txn_id=" << txn_id;
+                return;
+            }
+            if (lock_info.lock_id() != request->txn_id()) {
+                msg = "lock is expired";
+                code = MetaServiceCode::LOCK_EXPIRED;
+                return;
+            }
+            txn->remove(lock_keys[i]);
+            LOG(INFO) << "xxx remove delete bitmap lock, lock_key=" << hex(lock_keys[i])
+                      << " txn_id=" << txn_id;
+
+            for (auto tablet_id : table_id_tablet_ids[table_id]) {
+                std::string pending_key = meta_pending_delete_bitmap_key({instance_id, tablet_id});
+                txn->remove(pending_key);
+                LOG(INFO) << "xxx remove delete bitmap pending key, pending_key="
+                          << hex(pending_key) << " txn_id=" << txn_id;
+            }
+        }
+        lock_keys.clear();
+        lock_values.clear();
+
+        // Save table versions
+        for (auto& i : table_id_tablet_ids) {
+            std::string ver_key = table_version_key({instance_id, db_id, i.first});
+            txn->atomic_add(ver_key, 1);
+            LOG(INFO) << "xxx atomic add table_version_key=" << hex(ver_key)
+                      << " txn_id=" << txn_id;
+        }
+
+        LOG(INFO) << "xxx commit_txn put recycle_key key=" << hex(recycle_key)
+                  << " txn_id=" << txn_id;
+        LOG(INFO) << "commit_txn put_size=" << txn->put_bytes()
+                  << " del_size=" << txn->delete_bytes() << " num_put_keys=" << txn->num_put_keys()
+                  << " num_del_keys=" << txn->num_del_keys()
+                  << " txn_size=" << txn->approximate_bytes() << " txn_id=" << txn_id;
+
+        // Finally we are done...
+        err = txn->commit();
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::COMMIT>(err);
+            ss << "failed to commit kv txn, txn_id=" << txn_id << " err=" << err;
+            msg = ss.str();
+            return;
+        }
+
+        // submit current txn task
+        std::shared_ptr<TxnLazyCommitTask> task = txn_lazy_commiter->submit_task(instance_id, txn_id, txn_kv_);
+        task->wait();
+        txn_lazy_commiter->remove_task(txn_id);
+
+        txn.reset();
+        err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::CREATE>(err);
+            ss << "filed to create txn, txn_id=" << txn_id << " err=" << err;
+            msg = ss.str();
+            LOG(WARNING) << msg;
+            return;
+        }
+
+        for (auto& [tmp_rowset_key, tmp_rowset_pb] : tmp_rowsets_meta) {
+            int64_t table_id = tablet_ids[tmp_rowset_pb.tablet_id()].table_id();
+            std::string ver_val;
+            const std::string ver_key = partition_version_key(
+                    {instance_id, db_id, table_id, tmp_rowset_pb.partition_id()});
+            err = txn->get(ver_key, &ver_val);
+            if (TxnErrorCode::TXN_OK != err) {
+                code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TXN_ID_NOT_FOUND
+                                                              : cast_as<ErrCategory::READ>(err);
+                ss << "failed to get partiton version, txn_id=" << txn_id << " key=" << hex(ver_key)
+                   << " err=" << err;
+                msg = ss.str();
+                LOG(WARNING) << msg;
+            }
+            VersionPB version_pb;
+            if (!version_pb.ParseFromString(ver_val)) {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                ss << "failed to parse version pb txn_id=" << txn_id << " key=" << hex(ver_key);
+                msg = ss.str();
+                return;
+            }
+
+            if (version_pb.has_txn_id()) {
+                version_pb.clear_txn_id();
+            }
+            ver_val.clear();
+            if (!version_pb.SerializeToString(&ver_val)) {
+                code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+                ss << "failed to serialize version_pb when saving, txn_id=" << txn_id;
+                msg = ss.str();
+                return;
+            }
+            txn->put(ver_key, ver_val);
+        }
+
+        err = txn->commit();
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::COMMIT>(err);
+            ss << "failed to commit kv txn, txn_id=" << txn_id << " err=" << err;
+            msg = ss.str();
+            return;
+        }
+        //remove txn id in partition key
+    } while (need_commit_last_txn);
+    return;
+}
+
 /**
  * This process is generally the same as commit_txn, the difference is that
  * the partitions version will plus 1 in multi sub txns.
@@ -1266,31 +1869,12 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
  *    t1: t1_p1(3), t1_p2(3)
  *    t2: t2_p3(4), t2_p4(4)
  */
-void MetaServiceImpl::commit_txn_with_sub_txn(::google::protobuf::RpcController* controller,
-                                              const CommitTxnRequest* request,
-                                              CommitTxnResponse* response,
-                                              ::google::protobuf::Closure* done) {
-    RPC_PREPROCESS(commit_txn);
-    if (!request->has_txn_id()) {
-        code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = "invalid argument, missing txn id";
-        return;
-    }
-
+void MetaServiceImpl::commit_txn_with_sub_txn(
+        ::google::protobuf::RpcController* controller, const CommitTxnRequest* request,
+        CommitTxnResponse* response, ::google::protobuf::Closure* done, MetaServiceCode& code,
+        std::string& msg, std::stringstream& ss, const std::string& instance_id) {
     int64_t txn_id = request->txn_id();
     auto sub_txn_infos = request->sub_txn_infos();
-
-    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
-    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
-    if (instance_id.empty()) {
-        code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = "empty instance_id";
-        LOG(INFO) << msg << ", cloud_unique_id=" << cloud_unique_id << " txn_id=" << txn_id;
-        return;
-    }
-
-    RPC_RATE_LIMIT(commit_txn)
-
     // Create a readonly txn for scan tmp rowset
     std::unique_ptr<Transaction> txn;
     TxnErrorCode err = txn_kv_->create_txn(&txn);
