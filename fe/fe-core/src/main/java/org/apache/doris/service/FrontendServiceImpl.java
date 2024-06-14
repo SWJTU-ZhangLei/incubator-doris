@@ -333,7 +333,11 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                                 table.getName(), PrivPredicate.SHOW)) {
                             continue;
                         }
-                        table.readLock();
+
+                        if (table.tryReadLock(5000, TimeUnit.MILLISECONDS)) {
+                            LOG.warn("{}|{} get readlock timeout ", table.getName(), table.getId());
+                            throw new TException(table.getName() + "get readlock timeout ");
+                        }
                         try {
                             if (matcher != null && !matcher.match(table.getName())) {
                                 continue;
@@ -450,7 +454,10 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (db != null) {
             TableIf table = db.getTableNullableIfException(params.getTableName());
             if (table != null) {
-                table.readLock();
+                if (table.tryReadLock(5000, TimeUnit.MILLISECONDS)) {
+                    LOG.warn("{}|{} get readlock timeout ", table.getName(), table.getId());
+                    throw new TException(table.getName() + "get readlock timeout ");
+                }
                 try {
                     List<Column> baseSchema = table.getBaseSchemaOrEmpty();
                     for (Column column : baseSchema) {

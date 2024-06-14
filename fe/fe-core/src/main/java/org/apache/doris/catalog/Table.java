@@ -144,14 +144,17 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
 
     public void readLock() {
         this.rwLock.readLock().lock();
+        LOG.info("readLock().lock()");
     }
 
     public boolean tryReadLock(long timeout, TimeUnit unit) {
         try {
             boolean res = this.rwLock.readLock().tryLock(timeout, unit);
-            if (!res && unit.toSeconds(timeout) >= 1) {
+            if (!res) {
                 LOG.warn("Failed to try table {}'s read lock. timeout {} {}. Current owner: {}",
                         name, timeout, unit.name(), rwLock.getOwner());
+            } else {
+                LOG.info("readLock().tryReadLock() success");
             }
             return res;
         } catch (InterruptedException e) {
@@ -162,16 +165,20 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
 
     public void readUnlock() {
         this.rwLock.readLock().unlock();
+        LOG.info("readLock().unlock()");
     }
 
     public void writeLock() {
         this.rwLock.writeLock().lock();
+        LOG.info("writeLock().lock()");
     }
 
     public boolean writeLockIfExist() {
         this.rwLock.writeLock().lock();
+        LOG.info("writeLock().lock()");
         if (isDropped) {
             this.rwLock.writeLock().unlock();
+            LOG.info("writeLock().unlock()");
             return false;
         }
         return true;
@@ -180,9 +187,11 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
     public boolean tryWriteLock(long timeout, TimeUnit unit) {
         try {
             boolean res = this.rwLock.writeLock().tryLock(timeout, unit);
-            if (!res && unit.toSeconds(timeout) >= 1) {
+            if (!res) {
                 LOG.warn("Failed to try table {}'s write lock. timeout {} {}. Current owner: {}",
                         name, timeout, unit.name(), rwLock.getOwner());
+            } else {
+                LOG.info("writeLock().trylock() success");
             }
             return res;
         } catch (InterruptedException e) {
@@ -193,6 +202,7 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
 
     public void writeUnlock() {
         this.rwLock.writeLock().unlock();
+        LOG.info("writeLock().unlock()");
     }
 
     public boolean isWriteLockHeldByCurrentThread() {
