@@ -1779,9 +1779,10 @@ void MetaServiceImpl::commit_txn_v2(
         }
 
         // submit current txn task
-        std::shared_ptr<TxnLazyCommitTask> task = txn_lazy_commiter->submit_task(instance_id, txn_id, txn_kv_);
+        std::shared_ptr<TxnLazyCommitTask> task =
+                txn_lazy_committer->submit_task(instance_id, txn_id, txn_kv_);
         task->wait();
-        txn_lazy_commiter->remove_task(txn_id);
+        txn_lazy_committer->remove_task(txn_id);
 
         txn.reset();
         err = txn_kv_->create_txn(&txn);

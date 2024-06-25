@@ -91,10 +91,10 @@ void MetaServiceImpl::get_version_v2(::google::protobuf::RpcController* controll
 
                 if (version_pb.has_txn_id()) {
                     need_retry = true;
-                    std::shared_ptr<TxnLazyCommitTask> task = txn_lazy_commiter->submit_task(
+                    std::shared_ptr<TxnLazyCommitTask> task = txn_lazy_committer->submit_task(
                             instance_id, version_pb.txn_id(), txn_kv_);
                     task->wait();
-                    txn_lazy_commiter->remove_task(version_pb.txn_id());
+                    txn_lazy_committer->remove_task(version_pb.txn_id());
                 } else {
                     need_retry = false;
                     response->set_version(version_pb.version());

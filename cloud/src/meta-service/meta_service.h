@@ -30,7 +30,7 @@
 #include "common/config.h"
 #include "common/sync_point.h"
 #include "meta-service/txn_kv.h"
-#include "meta-service/txn_lazy_commiter.h"
+#include "meta-service/txn_lazy_committer.h"
 #include "rate-limiter/rate_limiter.h"
 #include "resource-manager/resource_manager.h"
 
@@ -307,7 +307,7 @@ private:
     std::shared_ptr<TxnKv> txn_kv_;
     std::shared_ptr<ResourceManager> resource_mgr_;
     std::shared_ptr<RateLimiter> rate_limiter_;
-    std::shared_ptr<TxnLazyCommiter> txn_lazy_commiter;
+    std::shared_ptr<TxnLazyCommitter> txn_lazy_committer;
 };
 
 class MetaServiceProxy final : public MetaService {

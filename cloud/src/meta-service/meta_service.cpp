@@ -75,7 +75,7 @@ MetaServiceImpl::MetaServiceImpl(std::shared_ptr<TxnKv> txn_kv,
     resource_mgr_ = resource_mgr;
     rate_limiter_ = rate_limiter;
     rate_limiter_->init(this);
-    txn_lazy_commiter = std::make_shared<TxnLazyCommiter>();
+    txn_lazy_committer = std::make_shared<TxnLazyCommitter>();
 }
 
 MetaServiceImpl::~MetaServiceImpl() = default;

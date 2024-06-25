@@ -191,5 +191,6 @@ CONF_Bool(enable_cluster_name_check, "false");
 
 CONF_Bool(enable_txn_lazy_commit, "false");
 CONF_Int32(txn_lazy_commit_thresold, "4");
+CONF_Int32(txn_lazy_commit_worker_num, "4");
 
 } // namespace doris::cloud::config
