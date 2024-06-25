@@ -194,9 +194,10 @@ void get_tablet_idx(MetaServiceCode& code, std::string& msg, Transaction* txn,
     }
 }
 
-void MetaServiceImpl::get_version(::google::protobuf::RpcController* controller,
-                                  const GetVersionRequest* request, GetVersionResponse* response,
-                                  ::google::protobuf::Closure* done) {
+void MetaServiceImpl::get_version_v1(::google::protobuf::RpcController* controller,
+                                          const GetVersionRequest* request,
+                                          GetVersionResponse* response,
+                                          ::google::protobuf::Closure* done) {
     if (request->batch_mode()) {
         batch_get_version(controller, request, response, done);
         return;

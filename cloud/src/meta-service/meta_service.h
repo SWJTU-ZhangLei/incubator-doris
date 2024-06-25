@@ -291,6 +291,14 @@ private:
                        std::stringstream& ss, const std::string& instance_id, int64_t db_id,
                        std::vector<std::pair<std::string, doris::RowsetMetaCloudPB>>& tmp_rowsets_meta);
 
+    void get_version_v1(::google::protobuf::RpcController* controller,
+                        const GetVersionRequest* request, GetVersionResponse* response,
+                        ::google::protobuf::Closure* done);
+
+    void get_version_v2(::google::protobuf::RpcController* controller,
+                        const GetVersionRequest* request, GetVersionResponse* response,
+                        ::google::protobuf::Closure* done);
+
 private:
     std::pair<MetaServiceCode, std::string> alter_instance(
             const AlterInstanceRequest* request,

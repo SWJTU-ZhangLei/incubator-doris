@@ -18,6 +18,7 @@ add_library(MetaService
     meta_service_tablet_stats.cpp
     meta_service_partition.cpp
     meta_service_txn.cpp
+    meta_service_version.cpp
     txn_kv.cpp
     codec.cpp
     keys.cpp

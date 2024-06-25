@@ -1889,6 +1889,7 @@ int InstanceRecycler::recycle_expired_txn_label() {
             LOG_ERROR("failed to create txn err={}", err).tag("key", hex(k));
             return -1;
         }
+
         // Remove txn index kv
         auto index_key = txn_index_key({instance_id_, txn_id});
         txn->remove(index_key);

@@ -908,7 +908,6 @@ void convert_tmp_rowsets(
 void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
                                  const CommitTxnRequest* request, CommitTxnResponse* response,
                                  ::google::protobuf::Closure* done)
-
 {
     RPC_PREPROCESS(commit_txn);
     if (!request->has_txn_id()) {
