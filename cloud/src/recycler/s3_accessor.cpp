@@ -252,7 +252,7 @@ int S3Accessor::init() {
         options.Retry.MaxRetries = config::max_s3_client_retry;
         auto cred =
                 std::make_shared<Azure::Storage::StorageSharedKeyCredential>(conf_.ak, conf_.sk);
-        uri_ = fmt::format("{}://{}.blob.core.windows.net/{}", config::s3_client_http_scheme,
+        uri_ = fmt::format("{}://{}.blob.core.windows.net/{}", config::azure_client_http_scheme,
                            conf_.ak, conf_.bucket);
         // In Azure's HTTP requests, all policies in the vector are called in a chained manner following the HTTP pipeline approach.
         // Within the RetryPolicy, the nextPolicy is called multiple times inside a loop.

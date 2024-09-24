@@ -1250,9 +1250,15 @@ DEFINE_mInt32(thrift_client_open_num_tries, "1");
 
 DEFINE_Bool(enable_index_compaction, "false");
 
-// http scheme in S3Client to use. E.g. http or https
+// http scheme in S3Client to use. E.g. http or https, default http
 DEFINE_String(s3_client_http_scheme, "http");
 DEFINE_Validator(s3_client_http_scheme, [](const std::string& config) -> bool {
+    return config == "http" || config == "https";
+});
+
+// http scheme for AzureClient to use. E.g. http or https, default https
+DEFINE_String(azure_client_http_scheme, "https");
+DEFINE_Validator(azure_client_http_scheme, [](const std::string& config) -> bool {
     return config == "http" || config == "https";
 });
 

@@ -199,9 +199,15 @@ CONF_String(priority_networks, "");
 
 CONF_Bool(enable_cluster_name_check, "false");
 
-// http scheme in S3Client to use. E.g. http or https
+// http scheme in S3Client to use. E.g. http or https, default http
 CONF_String(s3_client_http_scheme, "http");
 CONF_Validator(s3_client_http_scheme, [](const std::string& config) -> bool {
+    return config == "http" || config == "https";
+});
+
+// http scheme in AzureClient to use. E.g. http or https, default https
+CONF_String(azure_client_http_scheme, "https");
+CONF_Validator(azure_client_http_scheme, [](const std::string& config) -> bool {
     return config == "http" || config == "https";
 });
 
