@@ -170,6 +170,8 @@ static std::string_view remove_version_prefix(std::string_view path) {
     return path;
 }
 
+HttpResponse process_injection_point(MetaServiceImpl* service, brpc::Controller* ctrl);
+
 static HttpResponse process_alter_cluster(MetaServiceImpl* service, brpc::Controller* ctrl) {
     static std::unordered_map<std::string_view, AlterClusterRequest::Operation> operations {
             {"add_cluster", AlterClusterRequest::ADD_CLUSTER},
@@ -545,10 +547,12 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
             {"encode_key", process_encode_key},
             {"get_value", process_get_value},
             {"show_meta_ranges", process_show_meta_ranges},
+            {"injection_point", process_injection_point},
             {"v1/decode_key", process_decode_key},
             {"v1/encode_key", process_encode_key},
             {"v1/get_value", process_get_value},
             {"v1/show_meta_ranges", process_show_meta_ranges},
+            {"v1/injection_point", process_injection_point},
             // for get
             {"get_instance", process_get_instance_info},
             {"get_obj_store_info", process_get_obj_store_info},
