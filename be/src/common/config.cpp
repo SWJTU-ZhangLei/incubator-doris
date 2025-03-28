@@ -854,7 +854,7 @@ DEFINE_mDouble(tablet_version_graph_orphan_vertex_ratio, "0.1");
 // share delta writers when memtable_on_sink_node = true
 DEFINE_Bool(share_delta_writers, "true");
 // timeout for open load stream rpc in ms
-DEFINE_Int64(open_load_stream_timeout_ms, "60000"); // 60s
+DEFINE_Int64(open_load_stream_timeout_ms, "6000000"); // 60s
 // enable write background when using brpc stream
 DEFINE_mBool(enable_brpc_stream_write_background, "true");
 
